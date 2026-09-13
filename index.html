@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>HalloweenGame.qni 🎃</title>
+<title>Улови тиквите! 🎃</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Creepster&family=Nunito:wght@400;700;800;900&display=swap');
 
@@ -136,6 +136,25 @@
   .rank-3 .name-pill{ background:linear-gradient(90deg, var(--bronze-dark), var(--bronze)); color:#3a2005; }
   .rank-1 .rank, .rank-2 .rank, .rank-3 .rank{ opacity:1; }
 
+  .skin-card{
+    display:flex; align-items:center; gap:12px;
+    padding:10px 12px; border-radius:14px;
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.08);
+    cursor:pointer;
+  }
+  .skin-card + .skin-card{ margin-top:6px; }
+  .skin-card.selected{ border-color:var(--pumpkin); background:rgba(255,122,26,0.12); }
+  .skin-card.locked{ opacity:0.45; cursor:not-allowed; }
+  .skin-swatch{
+    width:36px; height:36px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:18px;
+  }
+  .skin-info{ flex:1; text-align:left; }
+  .skin-name{ font-weight:800; font-size:13px; color:var(--ghost); }
+  .skin-req{ font-size:11px; color:var(--ghost); opacity:0.6; }
+  .skin-check{ font-size:16px; color:var(--pumpkin); }
+
   button.play-btn{
     font-family:'Nunito', sans-serif; font-weight:900; font-size:19px;
     color:#1a0b2e; background:linear-gradient(180deg, #ffb454, var(--pumpkin));
@@ -188,6 +207,7 @@
 
   <div class="hud">
     <div class="score" id="scoreDisplay">0</div>
+    <div id="multiplierBadge" class="hidden" style="position:absolute; left:0; top:44px; font-weight:900; font-size:13px; color:#3a2a05; background:linear-gradient(90deg, var(--gold-dark), var(--gold)); padding:3px 10px; border-radius:999px;">×2 БОНУС</div>
     <div style="display:flex; align-items:flex-start; gap:12px; pointer-events:auto;">
       <button id="muteBtn" style="pointer-events:auto; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:var(--ghost); width:36px; height:36px; border-radius:50%; font-size:16px; cursor:pointer;">🔊</button>
       <div class="lives" id="livesDisplay"></div>
@@ -196,7 +216,7 @@
 
   <div class="overlay" id="startScreen">
     <h1 class="title">Улови тиквите!</h1>
-    <p class="subtitle">Движи котела, събирай 🎃 и 🍬, пази се от 💀. Мишка / пръст / ← →</p>
+    <p class="subtitle">Движи котела, събирай 🎃 и 🍬, пази се от 💀. Златна тиква 🌟 = х2 точки за кратко! Мишка / пръст / ← →</p>
 
     <div class="identity-row">
       <span>Играеш като <span class="identity-name" id="identityName">...</span></span>
@@ -206,10 +226,12 @@
     <div class="tabs">
       <button class="tab-btn active" id="tabGlobal">🏆 Обща класация</button>
       <button class="tab-btn" id="tabMine">📜 Моите опити</button>
+      <button class="tab-btn" id="tabSkins">🎭 Скинове</button>
     </div>
 
     <div class="board-wrap" id="boardGlobal"><div class="board-empty">Зареждане...</div></div>
     <div class="board-wrap hidden" id="boardMine"><div class="board-empty">Зареждане...</div></div>
+    <div class="board-wrap hidden" id="boardSkins"></div>
 
     <button class="play-btn" id="startBtn">Играй</button>
   </div>
@@ -313,6 +335,12 @@
   function sfxSkull(){
     ensureAudio(); if(!audioCtx) return;
     tone({freq:180, slideTo:60, dur:0.32, type:'sawtooth', vol:0.2, filterFreq:900});
+  }
+  function sfxGolden(){
+    ensureAudio(); if(!audioCtx) return;
+    tone({freq:660, dur:0.1, type:'triangle', vol:0.16});
+    tone({freq:880, dur:0.1, type:'triangle', vol:0.16, delay:0.08});
+    tone({freq:1100, dur:0.18, type:'triangle', vol:0.18, delay:0.16});
   }
   function sfxGameOver(){
     ensureAudio(); if(!audioCtx) return;
@@ -486,16 +514,26 @@
   // Tabs
   const tabGlobal = document.getElementById('tabGlobal');
   const tabMine = document.getElementById('tabMine');
+  const tabSkins = document.getElementById('tabSkins');
   const boardGlobal = document.getElementById('boardGlobal');
   const boardMine = document.getElementById('boardMine');
+  const boardSkins = document.getElementById('boardSkins');
+  function showTab(tab){
+    [tabGlobal,tabMine,tabSkins].forEach(t=>t.classList.remove('active'));
+    [boardGlobal,boardMine,boardSkins].forEach(b=>b.classList.add('hidden'));
+    tab.el.classList.add('active');
+    tab.board.classList.remove('hidden');
+  }
   tabGlobal.addEventListener('click', ()=>{
-    tabGlobal.classList.add('active'); tabMine.classList.remove('active');
-    boardGlobal.classList.remove('hidden'); boardMine.classList.add('hidden');
+    showTab({el:tabGlobal, board:boardGlobal});
     refreshGlobalBoard();
   });
   tabMine.addEventListener('click', ()=>{
-    tabMine.classList.add('active'); tabGlobal.classList.remove('active');
-    boardMine.classList.remove('hidden'); boardGlobal.classList.add('hidden');
+    showTab({el:tabMine, board:boardMine});
+  });
+  tabSkins.addEventListener('click', ()=>{
+    showTab({el:tabSkins, board:boardSkins});
+    renderSkins();
   });
 
   // Name modal
@@ -576,11 +614,64 @@
   // ================= PLAYER =================
   const player = { x:0.5, w:76, h:54, targetX:0.5 };
 
+  const SKINS = [
+    { id:'classic', name:'Класически котел', unlockAt:0, emoji:'🖤', body:'#1b1420', rim:'#ff7a1a', glow:'rgba(255,122,26,0.45)' },
+    { id:'pumpkin', name:'Тиквен кош', unlockAt:100, emoji:'🎃', body:'#7a3b10', rim:'#ffb347', glow:'rgba(255,179,71,0.5)' },
+    { id:'ghost', name:'Призрачна кофа', unlockAt:300, emoji:'👻', body:'#cfc9dd', rim:'#ffffff', glow:'rgba(255,255,255,0.55)' },
+    { id:'witch', name:'Магьоснически котел', unlockAt:600, emoji:'🧙', body:'#2a1440', rim:'#b968ff', glow:'rgba(185,104,255,0.55)' },
+    { id:'silver', name:'Сребърен казан', unlockAt:1000, emoji:'🥈', body:'#3a3a42', rim:'#d9dee6', glow:'rgba(217,222,230,0.5)' },
+    { id:'bat', name:'Прилепен котел', unlockAt:2000, emoji:'🦇', body:'#241830', rim:'#8a5cff', glow:'rgba(138,92,255,0.5)' },
+    { id:'web', name:'Паяжинен котел', unlockAt:3000, emoji:'🕷️', body:'#20242a', rim:'#c9c9c9', glow:'rgba(200,200,200,0.4)' },
+    { id:'vampire', name:'Вампирски казан', unlockAt:4000, emoji:'🧛', body:'#3a0a12', rim:'#ff2e4d', glow:'rgba(255,46,77,0.55)' },
+    { id:'zombie', name:'Зомби бъчва', unlockAt:5000, emoji:'🧟', body:'#26331a', rim:'#8fce3c', glow:'rgba(143,206,60,0.5)' },
+    { id:'mystic', name:'Мистичен котел', unlockAt:6000, emoji:'🔮', body:'#0f2438', rim:'#38e0d8', glow:'rgba(56,224,216,0.55)' },
+    { id:'bone', name:'Костен казан', unlockAt:7000, emoji:'💀', body:'#e9e4d0', rim:'#8a8370', glow:'rgba(233,228,208,0.5)' },
+    { id:'phoenix', name:'Огнен феникс', unlockAt:8000, emoji:'🔥', body:'#4a1006', rim:'#ff5a1f', glow:'rgba(255,90,31,0.6)' },
+    { id:'void', name:'Космически котел', unlockAt:9000, emoji:'🌌', body:'#0a0a18', rim:'#5566ff', glow:'rgba(85,102,255,0.55)' },
+    { id:'gold', name:'Златен казан', unlockAt:10000, emoji:'👑', body:'#4a3a08', rim:'#ffd76a', glow:'rgba(255,215,106,0.6)' }
+  ];
+
+  function getMyBest(){
+    return myAttempts.length ? Math.max(...myAttempts.map(a=>a.score)) : 0;
+  }
+  function getSelectedSkin(){
+    const id = lsGet('ulovi_skin') || 'classic';
+    return SKINS.find(s=>s.id===id) || SKINS[0];
+  }
+  function selectSkin(id){
+    const skin = SKINS.find(s=>s.id===id);
+    if(!skin) return;
+    if(getMyBest() < skin.unlockAt) return;
+    lsSet('ulovi_skin', id);
+    renderSkins();
+  }
+  function renderSkins(){
+    const wrap = document.getElementById('boardSkins');
+    const best = getMyBest();
+    const current = getSelectedSkin().id;
+    wrap.innerHTML = SKINS.map(s=>{
+      const unlocked = best >= s.unlockAt;
+      const sel = s.id === current;
+      return `<div class="skin-card ${unlocked?'':'locked'} ${sel?'selected':''}" data-skin="${s.id}">
+        <div class="skin-swatch" style="background:${s.body}; border:2px solid ${s.rim};">${unlocked?s.emoji:'🔒'}</div>
+        <div class="skin-info">
+          <div class="skin-name">${s.name}</div>
+          <div class="skin-req">${unlocked ? (sel?'Избран':'Отключен') : 'Отключва се при '+s.unlockAt+' точки'}</div>
+        </div>
+        ${sel?'<div class="skin-check">✓</div>':''}
+      </div>`;
+    }).join('');
+    wrap.querySelectorAll('.skin-card').forEach(el=>{
+      el.addEventListener('click', ()=> selectSkin(el.getAttribute('data-skin')));
+    });
+  }
+
   function drawPlayer(){
+    const skin = getSelectedSkin();
     const px = player.x*W, py = H - 70;
     ctx.save(); ctx.translate(px,py);
-    ctx.shadowColor='rgba(255,122,26,0.45)'; ctx.shadowBlur=18;
-    ctx.fillStyle = '#1b1420';
+    ctx.shadowColor=skin.glow; ctx.shadowBlur=18;
+    ctx.fillStyle = skin.body;
     ctx.beginPath();
     ctx.moveTo(-player.w/2, 0);
     ctx.quadraticCurveTo(0, player.h*0.9, player.w/2, 0);
@@ -588,9 +679,9 @@
     ctx.lineTo(-player.w/2+14, -10);
     ctx.quadraticCurveTo(-player.w/2+6, -8, -player.w/2, 0);
     ctx.closePath(); ctx.fill();
-    ctx.shadowBlur=0; ctx.strokeStyle = '#ff7a1a'; ctx.lineWidth = 4;
+    ctx.shadowBlur=0; ctx.strokeStyle = skin.rim; ctx.lineWidth = 4;
     ctx.beginPath(); ctx.ellipse(0,-10, player.w/2-10, 7, 0, 0, Math.PI*2); ctx.stroke();
-    ctx.fillStyle='#1b1420';
+    ctx.fillStyle = skin.body;
     ctx.fillRect(-player.w/2+4, player.h*0.55, 8, 10);
     ctx.fillRect(player.w/2-12, player.h*0.55, 8, 10);
     ctx.restore();
@@ -602,23 +693,37 @@
 
   function spawnItem(){
     const roll = Math.random();
-    let type = roll < 0.62 ? 'pumpkin' : (roll < 0.82 ? 'candy' : 'skull');
+    let type = roll < 0.57 ? 'pumpkin' : (roll < 0.77 ? 'candy' : (roll < 0.82 ? 'golden' : 'skull'));
     items.push({
       x: 0.08 + Math.random()*0.84, y: -0.05, type,
       speed: fallSpeedBase + Math.random()*0.8,
       rot: Math.random()*Math.PI*2, rotSpeed: (Math.random()-0.5)*0.05,
-      size: type==='candy' ? 26 : 34
+      size: type==='candy' ? 26 : (type==='golden' ? 40 : 34)
     });
   }
-  function emojiFor(type){ return type==='pumpkin' ? '🎃' : (type==='candy' ? '🍬' : '💀'); }
+  function emojiFor(type){
+    if(type==='pumpkin') return '🎃';
+    if(type==='candy') return '🍬';
+    if(type==='golden') return '🎃';
+    return '💀';
+  }
 
-  function drawItems(){
+  function drawItems(now){
     items.forEach(it=>{
       ctx.save(); ctx.translate(it.x*W, it.y*H); ctx.rotate(it.rot);
       ctx.font = `${it.size}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
       if(it.type==='candy'){ ctx.shadowColor='rgba(142,227,77,0.7)'; ctx.shadowBlur=14; }
       else if(it.type==='skull'){ ctx.shadowColor='rgba(255,255,255,0.35)'; ctx.shadowBlur=8; }
+      else if(it.type==='golden'){
+        const pulse = 18 + Math.sin((now||0)*0.01)*8;
+        ctx.shadowColor='rgba(255,215,90,0.95)'; ctx.shadowBlur=pulse;
+      }
       ctx.fillText(emojiFor(it.type), 0, 0);
+      if(it.type==='golden'){
+        ctx.font = `12px sans-serif`;
+        ctx.fillText('✨', it.size*0.32, -it.size*0.32);
+        ctx.fillText('✨', -it.size*0.32, it.size*0.28);
+      }
       ctx.restore();
     });
   }
@@ -640,6 +745,7 @@
 
   // ================= GAME STATE =================
   let score = 0, lives = 3, running = false, lastTime = 0, shake = 0;
+  let scoreMultiplier = 1, multiplierUntil = 0;
 
   const scoreDisplay = document.getElementById('scoreDisplay');
   const livesDisplay = document.getElementById('livesDisplay');
@@ -659,12 +765,21 @@
       livesDisplay.appendChild(span);
     }
   }
-  function updateScore(v){ score += v; scoreDisplay.textContent = score; }
+  function updateScore(v){
+    const now = performance.now();
+    const active = now < multiplierUntil;
+    const finalV = active ? v * scoreMultiplier : v;
+    score += Math.round(finalV);
+    scoreDisplay.textContent = score;
+    const badge = document.getElementById('multiplierBadge');
+    if(badge) badge.classList.toggle('hidden', !active);
+  }
 
   function startGame(){
     ensureAudio();
     if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     score = 0; lives = 3; items = []; particles = [];
+    scoreMultiplier = 1; multiplierUntil = 0;
     spawnInterval = 950; fallSpeedBase = 1.9; spawnTimer = 0;
     scoreDisplay.textContent = '0';
     renderLives();
@@ -717,6 +832,13 @@
         if(dx < player.w/2){
           if(it.type==='pumpkin'){ updateScore(10); burst(ix,iy,'#ff7a1a'); sfxPumpkin(); }
           else if(it.type==='candy'){ updateScore(25); burst(ix,iy,'#8ee34d'); sfxCandy(); }
+          else if(it.type==='golden'){
+            updateScore(50);
+            scoreMultiplier = 2;
+            multiplierUntil = now + 6000;
+            burst(ix,iy,'#ffd76a'); burst(ix,iy,'#fff1cf');
+            sfxGolden();
+          }
           else{
             lives -= 1; renderLives(); shake = 12; burst(ix,iy,'#e9e4f4'); sfxSkull();
             if(lives<=0){ items.splice(i,1); endGame(); continue; }
@@ -732,8 +854,11 @@
       ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
       shake *= 0.85; if(shake<0.5) shake=0;
     }
-    drawBackground(now); drawItems(); drawPlayer(); drawParticles(dt);
+    drawBackground(now); drawItems(now); drawPlayer(); drawParticles(dt);
     ctx.restore();
+
+    const badge = document.getElementById('multiplierBadge');
+    if(badge) badge.classList.toggle('hidden', now >= multiplierUntil);
 
     requestAnimationFrame(loop);
   }
