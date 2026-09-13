@@ -317,6 +317,7 @@
   // ================= PROFILE & LEADERBOARD STORAGE =================
   let profile = { id: String(Math.floor(1000 + Math.random()*9000)), name: null };
   let myAttempts = [];
+  let myBonusSkins = [];
   let globalBoard = {}; // id -> {id,name,bestScore,timesPlayed}
   let storageReady = false;
   const FIREBASE_DB_URL = 'https://halloweengameqni-d83e6-default-rtdb.firebaseio.com';
@@ -432,7 +433,7 @@
   }
 
   // ================= ADMIN PANEL =================
-  const ADMIN_PASSWORD = 'Qni_123456789'; 
+  const ADMIN_PASSWORD = 'Qni_123456789'; // <-- смени с твоя парола тук
 
   let secretClicks = 0, secretTimer = null;
   document.getElementById('secretTitle').addEventListener('click', ()=>{
@@ -486,6 +487,12 @@
     }
     list.innerHTML = arr.map(e=>{
       const nm = (e.name && e.name.trim()) ? e.name.trim() : ('Player#'+e.id);
+      const bonus = e.bonusSkins || [];
+      const skinOptions = SKINS.map(s=>`<option value="${s.id}">${s.emoji} ${s.name}</option>`).join('');
+      const bonusChips = bonus.length ? bonus.map(sid=>{
+        const s = SKINS.find(x=>x.id===sid);
+        return `<span class="skin-chip" data-id="${e.id}" data-skin="${sid}" style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.08); padding:3px 8px; border-radius:999px; font-size:11px; margin:2px 4px 2px 0; cursor:pointer;">${s?s.emoji+' '+s.name:sid} ✕</span>`;
+      }).join('') : '<span style="opacity:0.5; font-size:11px;">без подарени скинове</span>';
       return `<div class="admin-row" data-id="${e.id}">
         <div class="admin-row-top">
           <span class="admin-row-name">${escapeHtml(nm)} <span style="opacity:0.5;">#${e.id}</span></span>
@@ -497,20 +504,32 @@
           <button class="admin-btn admin-btn-add" data-action="sub" style="background:#e9c15a; color:#3a2a05;">− Извади</button>
           <button class="admin-btn admin-btn-del" data-action="del">Изтрий</button>
         </div>
+        <div style="margin-top:8px; display:flex; gap:6px; align-items:center;">
+          <select class="admin-skin-select" style="flex:1; padding:7px 8px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.06); color:var(--ghost); font-size:12px; font-family:'Nunito',sans-serif;">${skinOptions}</select>
+          <button class="admin-btn admin-btn-add" data-action="grantskin" style="background:var(--gold); color:#3a2a05;">🎭 Дай скин</button>
+        </div>
+        <div class="admin-bonus-list" style="margin-top:6px;">${bonusChips}</div>
       </div>`;
     }).join('');
 
     list.querySelectorAll('.admin-row').forEach(row=>{
       const id = row.getAttribute('data-id');
       const input = row.querySelector('.admin-points-input');
-      row.querySelectorAll('button').forEach(btn=>{
+      const select = row.querySelector('.admin-skin-select');
+      row.querySelectorAll('button[data-action]').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
           const action = btn.getAttribute('data-action');
           const amount = parseInt(input.value, 10) || 0;
           if(action === 'add') await adminAdjustPoints(id, amount);
           else if(action === 'sub') await adminAdjustPoints(id, -amount);
           else if(action === 'del') await adminRemovePlayer(id);
+          else if(action === 'grantskin') await adminGrantSkin(id, select.value);
         });
+      });
+    });
+    list.querySelectorAll('.skin-chip').forEach(chip=>{
+      chip.addEventListener('click', async ()=>{
+        await adminRevokeSkin(chip.getAttribute('data-id'), chip.getAttribute('data-skin'));
       });
     });
   }
@@ -535,6 +554,34 @@
     }catch(e){}
     await renderAdminPanel();
     refreshGlobalBoard();
+  }
+
+  async function adminGrantSkin(id, skinId){
+    try{
+      const res = await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`);
+      const entry = await res.json();
+      if(!entry) return;
+      const bonus = new Set(entry.bonusSkins || []);
+      bonus.add(skinId);
+      entry.bonusSkins = Array.from(bonus);
+      await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entry)
+      });
+    }catch(e){}
+    await renderAdminPanel();
+  }
+
+  async function adminRevokeSkin(id, skinId){
+    try{
+      const res = await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`);
+      const entry = await res.json();
+      if(!entry) return;
+      entry.bonusSkins = (entry.bonusSkins || []).filter(s=>s!==skinId);
+      await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entry)
+      });
+    }catch(e){}
+    await renderAdminPanel();
   }
 
   function displayName(p){
@@ -563,8 +610,17 @@
     myAttempts = lsGet('ulovi_attempts') || [];
 
     await refreshGlobalBoard();
+    await refreshMyBonusSkins();
     storageReady = true;
     renderIdentity();
+  }
+
+  async function refreshMyBonusSkins(){
+    try{
+      const res = await fetch(`${FIREBASE_DB_URL}/leaderboard/${profile.id}/bonusSkins.json`);
+      const data = await res.json();
+      myBonusSkins = Array.isArray(data) ? data : [];
+    }catch(e){ /* keep whatever we had */ }
   }
 
   async function refreshGlobalBoard(){
@@ -675,8 +731,9 @@
   tabMine.addEventListener('click', ()=>{
     showTab({el:tabMine, board:boardMine});
   });
-  tabSkins.addEventListener('click', ()=>{
+  tabSkins.addEventListener('click', async ()=>{
     showTab({el:tabSkins, board:boardSkins});
+    await refreshMyBonusSkins();
     renderSkins();
   });
 
@@ -785,7 +842,7 @@
   function selectSkin(id){
     const skin = SKINS.find(s=>s.id===id);
     if(!skin) return;
-    if(getMyBest() < skin.unlockAt) return;
+    if(getMyBest() < skin.unlockAt && !myBonusSkins.includes(id)) return;
     lsSet('ulovi_skin', id);
     renderSkins();
   }
@@ -794,13 +851,14 @@
     const best = getMyBest();
     const current = getSelectedSkin().id;
     wrap.innerHTML = SKINS.map(s=>{
-      const unlocked = best >= s.unlockAt;
+      const unlocked = best >= s.unlockAt || myBonusSkins.includes(s.id);
+      const gifted = myBonusSkins.includes(s.id) && best < s.unlockAt;
       const sel = s.id === current;
       return `<div class="skin-card ${unlocked?'':'locked'} ${sel?'selected':''}" data-skin="${s.id}">
         <div class="skin-swatch" style="background:${s.body}; border:2px solid ${s.rim};">${unlocked?s.emoji:'🔒'}</div>
         <div class="skin-info">
           <div class="skin-name">${s.name}</div>
-          <div class="skin-req">${unlocked ? (sel?'Избран':'Отключен') : 'Отключва се при '+s.unlockAt+' точки'}</div>
+          <div class="skin-req">${unlocked ? (gifted ? 'Получен като подарък 🎁' : (sel?'Избран':'Отключен')) : 'Отключва се при '+s.unlockAt+' точки'}</div>
         </div>
         ${sel?'<div class="skin-check">✓</div>':''}
       </div>`;
