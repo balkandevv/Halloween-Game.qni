@@ -155,6 +155,25 @@
   .skin-req{ font-size:11px; color:var(--ghost); opacity:0.6; }
   .skin-check{ font-size:16px; color:var(--pumpkin); }
 
+  .admin-row{
+    background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1);
+    border-radius:12px; padding:10px;
+  }
+  .admin-row-top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .admin-row-name{ font-weight:800; font-size:13px; color:var(--ghost); }
+  .admin-row-score{ font-weight:900; font-size:13px; color:var(--pumpkin); }
+  .admin-row-actions{ display:flex; gap:6px; align-items:center; }
+  .admin-row-actions input{
+    width:70px; padding:7px 8px; border-radius:8px; border:1px solid rgba(255,255,255,0.15);
+    background:rgba(255,255,255,0.06); color:var(--ghost); font-size:12px; font-family:'Nunito',sans-serif;
+  }
+  .admin-btn{
+    font-family:'Nunito', sans-serif; font-weight:800; font-size:11px;
+    border:none; padding:7px 10px; border-radius:8px; cursor:pointer;
+  }
+  .admin-btn-add{ background:var(--candy); color:#12300a; }
+  .admin-btn-del{ background:#ff4d5e; color:#3a0007; }
+
   button.play-btn{
     font-family:'Nunito', sans-serif; font-weight:900; font-size:19px;
     color:#1a0b2e; background:linear-gradient(180deg, #ffb454, var(--pumpkin));
@@ -215,7 +234,7 @@
   </div>
 
   <div class="overlay" id="startScreen">
-    <h1 class="title">Улови тиквите!</h1>
+    <h1 class="title" id="secretTitle" style="cursor:default; user-select:none;">Улови тиквите!</h1>
     <p class="subtitle">Движи котела, събирай 🎃 и 🍬, пази се от 💀. Златна тиква 🌟 = х2 точки за кратко! Мишка / пръст / ← →</p>
 
     <div class="identity-row">
@@ -254,6 +273,25 @@
         <button class="modal-cancel" id="nameCancel">Отказ</button>
         <button class="modal-save" id="nameSave">Запази</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="adminPassModal">
+    <div class="modal-card">
+      <p>🔒 Админ достъп — въведи паролата:</p>
+      <input type="password" id="adminPassInput" placeholder="Парола">
+      <div class="modal-actions">
+        <button class="modal-cancel" id="adminPassCancel">Отказ</button>
+        <button class="modal-save" id="adminPassSubmit">Влез</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="adminPanelModal">
+    <div class="modal-card" style="max-width:420px; max-height:80vh; overflow-y:auto; text-align:left;">
+      <p style="text-align:center; font-weight:900; color:var(--pumpkin); font-size:16px;">⚙️ Админ панел</p>
+      <div id="adminPlayerList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;"></div>
+      <button class="modal-cancel" id="adminCloseBtn" style="width:100%;">Затвори</button>
     </div>
   </div>
 
@@ -391,6 +429,112 @@
     lsSet('ulovi_muted', muted);
     if(masterGain) masterGain.gain.value = muted ? 0 : 1;
     document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
+  }
+
+  // ================= ADMIN PANEL =================
+  const ADMIN_PASSWORD = 'tikva2026'; // <-- смени с твоя парола тук
+
+  let secretClicks = 0, secretTimer = null;
+  document.getElementById('secretTitle').addEventListener('click', ()=>{
+    secretClicks++;
+    clearTimeout(secretTimer);
+    secretTimer = setTimeout(()=>{ secretClicks = 0; }, 2500);
+    if(secretClicks >= 7){
+      secretClicks = 0;
+      document.getElementById('adminPassInput').value = '';
+      document.getElementById('adminPassModal').classList.remove('hidden');
+    }
+  });
+
+  document.getElementById('adminPassCancel').addEventListener('click', ()=>{
+    document.getElementById('adminPassModal').classList.add('hidden');
+  });
+  document.getElementById('adminPassSubmit').addEventListener('click', ()=>{
+    const val = document.getElementById('adminPassInput').value;
+    if(val === ADMIN_PASSWORD){
+      document.getElementById('adminPassModal').classList.add('hidden');
+      openAdminPanel();
+    } else {
+      document.getElementById('adminPassInput').value = '';
+      document.getElementById('adminPassInput').placeholder = 'Грешна парола, опитай пак';
+    }
+  });
+  document.getElementById('adminCloseBtn').addEventListener('click', ()=>{
+    document.getElementById('adminPanelModal').classList.add('hidden');
+  });
+
+  async function openAdminPanel(){
+    document.getElementById('adminPanelModal').classList.remove('hidden');
+    await renderAdminPanel();
+  }
+
+  async function renderAdminPanel(){
+    const list = document.getElementById('adminPlayerList');
+    list.innerHTML = '<div class="board-empty">Зареждане...</div>';
+    let board = {};
+    try{
+      const res = await fetch(`${FIREBASE_DB_URL}/leaderboard.json`);
+      board = (await res.json()) || {};
+    }catch(e){
+      list.innerHTML = '<div class="board-empty">Неуспешно зареждане.</div>';
+      return;
+    }
+    const arr = Object.values(board).sort((a,b)=> (b.bestScore||0) - (a.bestScore||0));
+    if(arr.length === 0){
+      list.innerHTML = '<div class="board-empty">Все още няма играчи.</div>';
+      return;
+    }
+    list.innerHTML = arr.map(e=>{
+      const nm = (e.name && e.name.trim()) ? e.name.trim() : ('Player#'+e.id);
+      return `<div class="admin-row" data-id="${e.id}">
+        <div class="admin-row-top">
+          <span class="admin-row-name">${escapeHtml(nm)} <span style="opacity:0.5;">#${e.id}</span></span>
+          <span class="admin-row-score">${e.bestScore||0} т.</span>
+        </div>
+        <div class="admin-row-actions">
+          <input type="number" class="admin-points-input" value="100" step="50">
+          <button class="admin-btn admin-btn-add" data-action="add">+ Добави</button>
+          <button class="admin-btn admin-btn-add" data-action="sub" style="background:#e9c15a; color:#3a2a05;">− Извади</button>
+          <button class="admin-btn admin-btn-del" data-action="del">Изтрий</button>
+        </div>
+      </div>`;
+    }).join('');
+
+    list.querySelectorAll('.admin-row').forEach(row=>{
+      const id = row.getAttribute('data-id');
+      const input = row.querySelector('.admin-points-input');
+      row.querySelectorAll('button').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const action = btn.getAttribute('data-action');
+          const amount = parseInt(input.value, 10) || 0;
+          if(action === 'add') await adminAdjustPoints(id, amount);
+          else if(action === 'sub') await adminAdjustPoints(id, -amount);
+          else if(action === 'del') await adminRemovePlayer(id);
+        });
+      });
+    });
+  }
+
+  async function adminAdjustPoints(id, delta){
+    try{
+      const res = await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`);
+      const entry = await res.json();
+      if(!entry) return;
+      entry.bestScore = Math.max(0, (entry.bestScore||0) + delta);
+      await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(entry)
+      });
+    }catch(e){}
+    await renderAdminPanel();
+    refreshGlobalBoard();
+  }
+
+  async function adminRemovePlayer(id){
+    try{
+      await fetch(`${FIREBASE_DB_URL}/leaderboard/${id}.json`, { method:'DELETE' });
+    }catch(e){}
+    await renderAdminPanel();
+    refreshGlobalBoard();
   }
 
   function displayName(p){
