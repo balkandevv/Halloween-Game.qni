@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>HalloweenGame.qni 🎃</title>
+<title>Улови тиквите! 🎃</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Creepster&family=Nunito:wght@400;700;800;900&display=swap');
 
@@ -188,7 +188,10 @@
 
   <div class="hud">
     <div class="score" id="scoreDisplay">0</div>
-    <div class="lives" id="livesDisplay"></div>
+    <div style="display:flex; align-items:flex-start; gap:12px; pointer-events:auto;">
+      <button id="muteBtn" style="pointer-events:auto; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:var(--ghost); width:36px; height:36px; border-radius:50%; font-size:16px; cursor:pointer;">🔊</button>
+      <div class="lives" id="livesDisplay"></div>
+    </div>
   </div>
 
   <div class="overlay" id="startScreen">
@@ -257,6 +260,110 @@
   let globalBoard = {}; // id -> {id,name,bestScore,timesPlayed}
   let storageReady = false;
   const FIREBASE_DB_URL = 'https://halloweengameqni-d83e6-default-rtdb.firebaseio.com';
+
+  // ================= AUDIO =================
+  let audioCtx = null;
+  let masterGain = null;
+  let musicNodes = null;
+  let muted = lsGet('ulovi_muted') || false;
+
+  function ensureAudio(){
+    if(audioCtx) return;
+    try{
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = muted ? 0 : 1;
+      masterGain.connect(audioCtx.destination);
+    }catch(e){ audioCtx = null; }
+  }
+
+  function tone({freq=440, dur=0.15, type='sine', vol=0.16, delay=0, slideTo=null, filterFreq=null}){
+    if(!audioCtx) return;
+    const t0 = audioCtx.currentTime + delay;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if(slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(slideTo,1), t0+dur);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(vol, t0+0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    let node = osc;
+    if(filterFreq){
+      const filt = audioCtx.createBiquadFilter();
+      filt.type='lowpass'; filt.frequency.value = filterFreq;
+      osc.connect(filt); filt.connect(gain);
+    } else {
+      osc.connect(gain);
+    }
+    gain.connect(masterGain);
+    osc.start(t0);
+    osc.stop(t0+dur+0.05);
+  }
+
+  function sfxPumpkin(){
+    ensureAudio(); if(!audioCtx) return;
+    tone({freq:520, slideTo:780, dur:0.14, type:'triangle', vol:0.18});
+  }
+  function sfxCandy(){
+    ensureAudio(); if(!audioCtx) return;
+    tone({freq:880, dur:0.09, type:'sine', vol:0.15});
+    tone({freq:1320, dur:0.14, type:'sine', vol:0.14, delay:0.06});
+  }
+  function sfxSkull(){
+    ensureAudio(); if(!audioCtx) return;
+    tone({freq:180, slideTo:60, dur:0.32, type:'sawtooth', vol:0.2, filterFreq:900});
+  }
+  function sfxGameOver(){
+    ensureAudio(); if(!audioCtx) return;
+    tone({freq:400, slideTo:200, dur:0.3, type:'triangle', vol:0.16});
+    tone({freq:300, slideTo:120, dur:0.4, type:'triangle', vol:0.16, delay:0.22});
+  }
+
+  let musicTimer = null;
+  function startMusic(){
+    ensureAudio(); if(!audioCtx) return;
+    stopMusic();
+    const bass = audioCtx.createOscillator();
+    const bassGain = audioCtx.createGain();
+    bass.type = 'sine'; bass.frequency.value = 82;
+    bassGain.gain.value = 0.045;
+    bass.connect(bassGain); bassGain.connect(masterGain);
+    bass.start();
+
+    const lfo = audioCtx.createOscillator();
+    const lfoGain = audioCtx.createGain();
+    lfo.frequency.value = 0.18; lfoGain.gain.value = 14;
+    lfo.connect(lfoGain); lfoGain.connect(bass.frequency);
+    lfo.start();
+
+    musicNodes = { bass, lfo, bassGain };
+
+    const notes = [220, 246.9, 220, 196, 174.6, 196, 220, 246.9];
+    let i = 0;
+    function pluck(){
+      if(!musicNodes) return;
+      tone({freq: notes[i % notes.length], dur:0.5, type:'sine', vol:0.035, filterFreq:1200});
+      i++;
+      musicTimer = setTimeout(pluck, 950);
+    }
+    pluck();
+  }
+  function stopMusic(){
+    if(musicTimer) clearTimeout(musicTimer);
+    musicTimer = null;
+    if(musicNodes){
+      try{ musicNodes.bass.stop(); musicNodes.lfo.stop(); }catch(e){}
+      musicNodes = null;
+    }
+  }
+
+  function setMuted(val){
+    muted = val;
+    lsSet('ulovi_muted', muted);
+    if(masterGain) masterGain.gain.value = muted ? 0 : 1;
+    document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
+  }
 
   function displayName(p){
     return (p && p.name && p.name.trim()) ? p.name.trim() : ('Player#' + p.id);
@@ -555,6 +662,8 @@
   function updateScore(v){ score += v; scoreDisplay.textContent = score; }
 
   function startGame(){
+    ensureAudio();
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     score = 0; lives = 3; items = []; particles = [];
     spawnInterval = 950; fallSpeedBase = 1.9; spawnTimer = 0;
     scoreDisplay.textContent = '0';
@@ -563,11 +672,14 @@
     gameOverScreen.classList.add('hidden');
     playHint.classList.remove('hidden');
     running = true; lastTime = performance.now();
+    startMusic();
     requestAnimationFrame(loop);
   }
 
   function endGame(){
     running = false;
+    stopMusic();
+    sfxGameOver();
     const myBest = myAttempts.length ? Math.max(...myAttempts.map(a=>a.score), score) : score;
     finalScoreEl.textContent = score;
     recordResult(score).then(()=>{
@@ -603,10 +715,10 @@
       if(iy > catchY - 20 && iy < catchY + 26){
         const dx = Math.abs(ix - player.x*W);
         if(dx < player.w/2){
-          if(it.type==='pumpkin'){ updateScore(10); burst(ix,iy,'#ff7a1a'); }
-          else if(it.type==='candy'){ updateScore(25); burst(ix,iy,'#8ee34d'); }
+          if(it.type==='pumpkin'){ updateScore(10); burst(ix,iy,'#ff7a1a'); sfxPumpkin(); }
+          else if(it.type==='candy'){ updateScore(25); burst(ix,iy,'#8ee34d'); sfxCandy(); }
           else{
-            lives -= 1; renderLives(); shake = 12; burst(ix,iy,'#e9e4f4');
+            lives -= 1; renderLives(); shake = 12; burst(ix,iy,'#e9e4f4'); sfxSkull();
             if(lives<=0){ items.splice(i,1); endGame(); continue; }
           }
           items.splice(i,1); continue;
@@ -648,6 +760,11 @@
 
   document.getElementById('startBtn').addEventListener('click', startGame);
   document.getElementById('retryBtn').addEventListener('click', startGame);
+  document.getElementById('muteBtn').addEventListener('click', ()=>{
+    ensureAudio();
+    setMuted(!muted);
+  });
+  document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
   document.getElementById('menuBtn').addEventListener('click', ()=>{
     gameOverScreen.classList.add('hidden');
     refreshGlobalBoard();
